@@ -1,7 +1,9 @@
 import { test } from "@jest/globals";
 import PostgresVectorStore, { PostgresVectorStoreArgs } from "../vectorStore.js";
 import PostgresEngine, { Column, PostgresEngineArgs, VectorStoreTableArgs } from "../engine.js";
+import { Document, DocumentInterface } from "@langchain/core/documents";
 import { SyntheticEmbeddings } from "@langchain/core/utils/testing";
+import { v4 as uuidv4 } from "uuid";
 import * as dotenv from "dotenv";
 
 dotenv.config()
@@ -15,17 +17,44 @@ const METADATA_COLUMNS = [new Column("page", "TEXT"), new Column("source", "TEXT
 const STORE_METADATA = true;
 
 const embeddingService = new SyntheticEmbeddings({vectorSize: VECTOR_SIZE});
+const texts = ["foo", "bar", "baz"];
+const metadatas = [];
+const docs: DocumentInterface[] = [];
+const embeddings = [];
+
+const pgArgs: PostgresEngineArgs = {
+  user: process.env.DB_USER ?? "",
+  password: process.env.PASSWORD ?? ""
+}
+
+const vsTableArgs: VectorStoreTableArgs = {
+  contentColumn: CONTENT_COLUMN,
+  embeddingColumn: EMBEDDING_COLUMN,
+  idColumn: ID_COLUMN, 
+  metadataColumns: METADATA_COLUMNS,
+  storeMetadata: STORE_METADATA,
+  overwriteExisting: true
+};
+
+const pvectorArgs: PostgresVectorStoreArgs = {
+  idColumn: ID_COLUMN,
+  contentColumn: CONTENT_COLUMN,
+  embeddingColumn: EMBEDDING_COLUMN,
+  metadataColumns: ["page", "source"],
+  metadataJsonColumn: "mymeta",
+}
+
+for (let i = 0; i < texts.length; i++) {
+  metadatas.push({"page": i.toString(), "source": "google.com"});
+  docs.push(new Document({pageContent: texts[i], metadata: metadatas[i]}));
+  embeddings.push(embeddingService.embedQuery(texts[i]));
+}
 
 describe("VectorStore creation", () => {
   let PEInstance: PostgresEngine;
   let vectorStoreInstance: PostgresVectorStore;
 
   beforeAll(async () => {
-    const pgArgs: PostgresEngineArgs = {
-      user: process.env.DB_USER ?? "",
-      password: process.env.PASSWORD ?? ""
-    }
-
     PEInstance = await PostgresEngine.from_instance(
       process.env.PROJECT_ID ?? "",
       process.env.REGION ?? "",
@@ -33,15 +62,6 @@ describe("VectorStore creation", () => {
       process.env.DB_NAME ?? "",
       pgArgs
     );
-
-    const vsTableArgs: VectorStoreTableArgs = {
-      contentColumn: CONTENT_COLUMN,
-      embeddingColumn: EMBEDDING_COLUMN,
-      idColumn: ID_COLUMN, 
-      metadataColumns: METADATA_COLUMNS,
-      storeMetadata: STORE_METADATA,
-      overwriteExisting: true
-    };
 
     await PEInstance.pool.raw(`DROP TABLE IF EXISTS ${CUSTOM_TABLE}`)
     await PEInstance.init_vectorstore_table(CUSTOM_TABLE, VECTOR_SIZE, vsTableArgs);
@@ -133,4 +153,49 @@ describe("VectorStore creation", () => {
       throw new Error(`Error on closing connection: ${error}`);
     }
   })
+})
+
+describe("VectorStore addDocuments method", () => {
+
+  let PEInstance: PostgresEngine;
+  let vectorStoreInstance: PostgresVectorStore;
+
+  beforeAll(async () => {
+    PEInstance = await PostgresEngine.from_instance(
+      process.env.PROJECT_ID ?? "",
+      process.env.REGION ?? "",
+      process.env.INSTANCE_NAME ?? "",
+      process.env.DB_NAME ?? "",
+      pgArgs
+    );
+
+    await PEInstance.pool.raw(`DROP TABLE IF EXISTS "${CUSTOM_TABLE}"`)
+    await PEInstance.init_vectorstore_table(CUSTOM_TABLE, VECTOR_SIZE, vsTableArgs);
+    vectorStoreInstance = await PostgresVectorStore.create(PEInstance, embeddingService, CUSTOM_TABLE, pvectorArgs)
+  });
+
+  test("should return the same length of results as the added documents {3}", async () => {
+    const ids = Array.from(texts).map(() => uuidv4());
+    await vectorStoreInstance.addDocuments(docs, ids);
+    const {rows} = await PEInstance.pool.raw(`SELECT * FROM "${CUSTOM_TABLE}"`);
+    expect(rows).toHaveLength(3);
+  })
+
+  test("should return the same length of results as the added documents {3}, without passing ids", async () => {
+    await vectorStoreInstance.addDocuments(docs);
+    const {rows} = await PEInstance.pool.raw(`SELECT * FROM "${CUSTOM_TABLE}"`);
+    expect(rows).toHaveLength(3);
+  })
+
+  afterEach(async () => {
+    await PEInstance.pool.raw(`TRUNCATE TABLE "${CUSTOM_TABLE}"`);
+  })
+
+  afterAll(async () => {
+    try {
+      await PEInstance.closeConnection();
+    } catch (error) {
+      throw new Error(`Error on closing connection: ${error}`);
+    }
+  });
 })

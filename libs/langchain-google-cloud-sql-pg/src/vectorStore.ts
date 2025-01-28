@@ -1,8 +1,10 @@
 import { Embeddings } from "@langchain/core/embeddings";
-import PostgresEngine from "./engine.js";
-import { DEFAULT_DISTANCE_STRATEGY, DistanceStrategy, QueryOptions } from "./indexes.js";
 import { VectorStore } from "@langchain/core/vectorstores";
 import { DocumentInterface } from "@langchain/core/documents";
+import { v4 as uuidv4 } from "uuid";
+import { DEFAULT_DISTANCE_STRATEGY, DistanceStrategy, QueryOptions } from "./indexes.js";
+import PostgresEngine from "./engine.js";
+import { customZip } from "./utils/utils.js";
 
 export interface PostgresVectorStoreArgs {
   schemaName?: string,
@@ -14,9 +16,9 @@ export interface PostgresVectorStoreArgs {
   k?: Number,
   fetch_k?: Number,
   lambdaMult?: Number,
-  ignoreMetadataColumns?: Array<string>, //optional
-  metadataJsonColumn?: string, // optional
-  indexQueryOptions?: QueryOptions // optional
+  ignoreMetadataColumns?: Array<string>,
+  metadataJsonColumn?: string,
+  indexQueryOptions?: QueryOptions
 }
 
 /**
@@ -192,16 +194,106 @@ class PostgresVectorStore extends VectorStore{
       )
   }
 
+  async addEmbeddings(
+    texts: Iterable<string>,
+    embeddings: number[][], 
+    metadatas?: Array<Record<string, any>> | null,
+    ids?: { [x: string]: any; },
+  ): Promise<{[x: string]: any;}> {
+
+    if(!ids) {
+      ids = Array.from(texts).map(() => uuidv4());
+    }
+    if(!metadatas) {
+      metadatas = Array.from(texts).map(() => new Object());
+    }
+
+    const tuples = customZip(ids, texts, embeddings, metadatas)
+    
+    // Insert embeddings
+    for (const [id, content, embedding, metadata] of tuples) {
+      const metadataColNames = this.metadataColumns.length > 0 ? this.metadataColumns.join(",") : "";
+
+      let stmt = `INSERT INTO "${this.schemaName}"."${this.tableName}"(${this.idColumn}, ${this.contentColumn}, ${this.embeddingColumn}, ${metadataColNames}`
+      let values = {
+        id: id,
+        content: content,
+        embedding: `[${embedding.toString()}]`
+      }
+      let valuesStmt = " VALUES (:id, :content, :embedding";
+
+      // Add metadata
+      let extra = metadata;
+      for (const metadataColumn of this.metadataColumns) {
+        if(metadata.hasOwnProperty(metadataColumn)){
+          valuesStmt += `, :${metadataColumn}`
+          values[metadataColumn as keyof typeof values] = metadata[metadataColumn] //
+          delete extra[metadataColumn]
+        } else {
+          valuesStmt += " ,null"
+        }
+      }
+
+      // Add JSON column and/or close statement
+      stmt += this.metadataJsonColumn ? `, ${this.metadataJsonColumn})` : ")";
+      if(this.metadataJsonColumn) {
+        valuesStmt += ", :extra)";
+        Object.assign(values, {"extra": JSON.stringify(extra)})
+      } else {
+        valuesStmt += ")" 
+      }
+
+      const query = stmt + valuesStmt;
+      await this.engine.pool.raw(query, values)
+    }
+
+    return ids;
+  }
+
+  async addTexts(texts: Iterable<string>, metadatas?: Array<Record<string, any>> | null, ids?: { [x: string]: any; }): Promise<{[x: string]: any;}> {
+    const documents = Array.from(texts)
+    const embeddings = await this.embeddings.embedDocuments(documents);
+    ids = await this.addEmbeddings(texts, embeddings, metadatas, ids);
+
+    return ids;
+  }
+
   _vectorstoreType(): string { // TODO: implement methods
     //throw new Error("Method not implemented.");
     return ""
   }
+  
   addVectors(vectors: number[][], documents: DocumentInterface[], options?: { [x: string]: any; }): Promise<string[] | void> {
     throw new Error("Method not implemented.");
   }
-  addDocuments(documents: DocumentInterface[], options?: { [x: string]: any; }): Promise<string[] | void> {
-    throw new Error("Method not implemented.");
+
+  /**
+   * Adds documents to the vector store, embedding them first through the
+   * `embeddings` instance.
+   *
+   * @param documents - Array of documents to embed and add.
+   * @param options - Optional configuration for embedding and storing documents.
+   * @returns A promise resolving to an array of document IDs or void, based on implementation.
+   * @abstract
+   */
+  
+  async addDocuments(documents: DocumentInterface[], options?: { [x: string]: any; }): Promise<string[] | void> {
+    let texts = [];
+    let metadatas = [];
+    
+    for (const doc of documents) {
+      texts.push(doc.pageContent)
+      metadatas.push(doc.metadata)
+    }
+    
+    const results = await this.addTexts(texts, metadatas, options) 
+    const ids = Object.values(results).filter(
+      (value): value is string[] => Array.isArray(value) && value.every(item => typeof item === "string")
+    );
+
+    return ids.length > 0 ? ids.flat() : undefined;
   }
+
   similaritySearchVectorWithScore(query: number[], k: number, filter?: this["FilterType"] | undefined): Promise<[DocumentInterface, number][]> {
     throw new Error("Method not implemented.");
   }
@@ -212,7 +304,7 @@ class PostgresVectorStore extends VectorStore{
    * @param _params - Flexible key-value pairs defining conditions for document deletion.
    * @returns A promise that resolves once the deletion is complete.
    */
-  async delete(_params?: Record<string, any>): Promise<void> { // TODO: test this method
+   async delete(_params?: Record<string, any>): Promise<void> { // TODO: test this method
     if(_params === undefined) return;
     const idList = _params.map((id: any) => `'${id}'`).join(", ");
     const query = `DELETE FROM "${this.schemaName}"."${this.tableName}" WHERE ${this.idColumn} in (${idList})`;

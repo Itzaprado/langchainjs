@@ -10,7 +10,7 @@ import { GoogleAuth } from "google-auth-library";
 export const getIAMPrincipalEmail = async (auth: GoogleAuth): Promise<string> => {
   const credentials = await auth.getCredentials();
   
-  if('client_email' in credentials && credentials.client_email !== undefined) {
+  if ('client_email' in credentials && credentials.client_email !== undefined) {
     return credentials.client_email.replace(".gserviceaccount.com", "");
   }
 
@@ -20,7 +20,7 @@ export const getIAMPrincipalEmail = async (auth: GoogleAuth): Promise<string> =>
   const url = `https://oauth2.googleapis.com/tokeninfo?access_token=${accessToken}`;
   const clientResponse = await client.request({url}).then((res: { data: any; }) => res.data)
   
-  if(!('email' in clientResponse)) {
+  if (!('email' in clientResponse)) {
     throw new Error(
       "Failed to automatically obtain authenticated IAM principal's " +
       "email address using environment's ADC credentials!"
@@ -28,4 +28,13 @@ export const getIAMPrincipalEmail = async (auth: GoogleAuth): Promise<string> =>
   }
   const email = clientResponse['email']
   return email.replace(".gserviceaccount.com", "");
+}
+
+export const customZip = (...arrays: any[]) => {
+  const minLength = Math.min(...arrays.map(arr => arr.length));
+  const result = [];
+  for (let i = 0; i < minLength; i++) {
+    result.push(arrays.map(arr => arr[i]));
+  }
+  return result;
 }
