@@ -38,3 +38,42 @@ export const customZip = (...arrays: any[]) => {
   }
   return result;
 }
+
+/*
+  Formatter functions
+*/
+
+// txt document formatter.
+export function textFormatter(row: { [key: string]: any }, content_columns: string[]): string {
+  return content_columns
+    .filter((column) => column in row)
+    .map((column) => String(row[column]))
+    .join(" ");
+}
+
+// CSV document formatter.
+export function csvFormatter(row: { [key: string]: any }, content_columns: string[]): string {
+  return content_columns
+    .filter((column) => column in row)
+    .map((column) => String(row[column]))
+    .join(", ");
+}
+
+// YAML document formatter 
+export function yamlFormatter(row: { [key: string]: any }, content_columns: string[]): string {
+  return content_columns
+    .filter((column) => column in row)
+    .map((column) => `${column}: ${String(row[column])}`)
+    .join("\n");
+}
+
+// JSON document formatter
+export function jsonFormatter(row: { [key: string]: any }, content_columns: string[]): string {
+  const dictionary: { [key: string]: any } = {};
+  for (const column of content_columns) {
+    if (column in row) {
+      dictionary[column] = row[column];
+    }
+  }
+  return JSON.stringify(dictionary);
+}
