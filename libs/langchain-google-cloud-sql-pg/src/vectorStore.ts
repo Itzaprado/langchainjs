@@ -427,13 +427,7 @@ export class PostgresVectorStore extends VectorStore {
 
     const stmt = `CREATE INDEX ${concurrently ? "CONCURRENTLY" : ""} ${name} ON "${this.schemaName}"."${this.tableName}" USING ${index.indexType} (${this.embeddingColumn} ${funct}) ${params} ${filter};`
 
-    if (concurrently) {
-      await this.engine.pool.raw("COMMIT");
-      await this.engine.pool.raw(stmt)
-    } else {
-      await this.engine.pool.raw(stmt);
-      (await this.engine.pool.transaction()).commit();
-    }
+    await this.engine.pool.raw(stmt);
   }
 
   /**
