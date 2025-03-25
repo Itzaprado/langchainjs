@@ -22,17 +22,23 @@ export class DistanceStrategy extends StrategyMixin {
 export const DEFAULT_DISTANCE_STRATEGY = DistanceStrategy.COSINE_DISTANCE;
 export const DEFAULT_INDEX_NAME_SUFFIX: string = "langchainvectorindex";
 
+export interface BaseIndexArgs {
+  name?: string;
+  distanceStrategy?: DistanceStrategy;
+  partialIndexes?: string[]
+}
+
 export abstract class BaseIndex {
-  name: string;
+  name?: string;
   indexType: string;
   distanceStrategy: DistanceStrategy;
-  partialIndexes: string[]
+  partialIndexes?: string[]
 
   constructor(name?: string, indexType: string = "base", distanceStrategy: DistanceStrategy = DistanceStrategy.COSINE_DISTANCE, partialIndexes?: string[]) {
-    this.name = name!;
+    this.name = name;
     this.indexType = indexType;
     this.distanceStrategy = distanceStrategy;
-    this.partialIndexes = partialIndexes!;
+    this.partialIndexes = partialIndexes;
   }
 
   /**
@@ -42,10 +48,9 @@ export abstract class BaseIndex {
 }
 
 export class ExactNearestNeighbor extends BaseIndex {
-  indexType: string = "exactnearestneighbor";
 
-  constructor() {
-    super()  
+  constructor(baseArgs?: BaseIndexArgs) {
+    super(baseArgs?.name, "exactnearestneighbor", baseArgs?.distanceStrategy, baseArgs?.partialIndexes)  
   }
 
   indexOptions(): string {
@@ -54,12 +59,13 @@ export class ExactNearestNeighbor extends BaseIndex {
 }
 
 export class HNSWIndex extends BaseIndex {
-  indexType: string = "hnsw";
-  m: number = 16;
-  efConstruction: number = 64;
+  m: number;
+  efConstruction: number;
 
-  constructor() {
-    super();
+  constructor(baseArgs?: BaseIndexArgs, m?: number, efConstruction?: number) {
+    super(baseArgs?.name, "hnsw", baseArgs?.distanceStrategy, baseArgs?.partialIndexes);
+    this.m = m ?? 16;
+    this.efConstruction = efConstruction ?? 64;
   }
 
   indexOptions(): string {
@@ -68,11 +74,11 @@ export class HNSWIndex extends BaseIndex {
 }
 
 export class IVFFlatIndex extends BaseIndex {
-  indexType: string = "ivfflat";
-  lists: number = 100;
+  lists: number;
 
-  constructor() {
-    super()
+  constructor(baseArgs: BaseIndexArgs, lists?: number) {
+    super(baseArgs?.name, "ivfflat", baseArgs?.distanceStrategy, baseArgs?.partialIndexes);
+    this.lists = lists ?? 100;
   }
 
   indexOptions(): string {
@@ -89,10 +95,11 @@ export abstract class QueryOptions {
 }
 
 export class HNSWQueryOptions extends QueryOptions {
-  efSearch: number = 40;
+  efSearch: number;
 
-  constructor() {
+  constructor(efSearch?: number) {
     super();
+    this.efSearch = efSearch ?? 40;
   }
 
   to_string(): string {
@@ -101,10 +108,11 @@ export class HNSWQueryOptions extends QueryOptions {
 }
 
 export class IVFFlatQueryOptions extends QueryOptions {
-  probes: number = 1;
+  readonly probes: number;
 
-  constructor() {
+  constructor(probes?: number) {
     super();
+    this.probes = probes ?? 1;
   }
 
   to_string(): string {
