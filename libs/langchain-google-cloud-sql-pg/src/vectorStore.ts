@@ -2,7 +2,7 @@ import { EmbeddingsInterface } from "@langchain/core/embeddings";
 import { MaxMarginalRelevanceSearchOptions, VectorStore } from "@langchain/core/vectorstores";
 import { Document } from "@langchain/core/documents";
 import { v4 as uuidv4 } from "uuid";
-import { DEFAULT_DISTANCE_STRATEGY, DistanceStrategy, QueryOptions } from "./indexes.js";
+import { BaseIndex, DEFAULT_DISTANCE_STRATEGY, DEFAULT_INDEX_NAME_SUFFIX, DistanceStrategy, ExactNearestNeighbor, QueryOptions } from "./indexes.js";
 import PostgresEngine from "./engine.js";
 import { customZip } from "./utils/utils.js";
 import { maximalMarginalRelevance } from "@langchain/core/utils/math";
@@ -401,6 +401,50 @@ export class PostgresVectorStore extends VectorStore {
 
     return docsList; 
   }
+
+  /**
+   * Create an index on the vector store table
+   * @param {BaseIndex} index 
+   * @param {string} name Optional
+   * @param {boolean} concurrently Optional
+   */
+  async applyVectorIndex(index: BaseIndex, name?: string, concurrently: boolean = false): Promise<void> {
+    if (index instanceof ExactNearestNeighbor) {
+      await this.dropVectorIndex();
+      return;
+    }
+
+    const filter = index.partialIndexes ? `WHERE (${index.partialIndexes})` : "";
+    const params = `WITH ${index.indexOptions()}`;
+    const funct = index.distanceStrategy.indexFunction;
+
+    if (!name) {
+      if (!index.name) {
+        index.name = this.tableName + DEFAULT_INDEX_NAME_SUFFIX;
+      }
+      name = index.name;
+    }
+
+    const stmt = `CREATE INDEX ${concurrently ? "CONCURRENTLY" : ""} ${name} ON "${this.schemaName}"."${this.tableName}" USING ${index.indexType} (${this.embeddingColumn} ${funct}) ${params} ${filter};`
+
+    await this.engine.pool.raw(stmt);
+  }
+
+  /**
+   * Check if index exists in the table.
+   * @param {string} indexName Optional - index name
+   */
+  async isValidIndex(indexName?: string): Promise<boolean> {
+    const idxName = indexName || (this.tableName + DEFAULT_INDEX_NAME_SUFFIX);
+    const stmt = `SELECT tablename, indexname
+                  FROM pg_indexes
+                  WHERE tablename = '${this.tableName}' AND schemaname = '${this.schemaName}' AND indexname = '${idxName}';`
+    const {rows} = await this.engine.pool.raw(stmt);
+
+    return rows.length === 1;
+  }
+
+  async dropVectorIndex() {}
 }
 
 export default PostgresVectorStore;
