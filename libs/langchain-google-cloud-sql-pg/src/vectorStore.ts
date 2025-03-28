@@ -444,7 +444,25 @@ export class PostgresVectorStore extends VectorStore {
     return rows.length === 1;
   }
 
-  async dropVectorIndex() {}
+  /**
+   * Drop the vector index
+   * @param {string} indexName Optional - index name
+   */
+  async dropVectorIndex(indexName?: string): Promise<void> {
+    const idxName = indexName || (this.tableName + DEFAULT_INDEX_NAME_SUFFIX);
+    const query = `DROP INDEX IF EXISTS ${idxName};`;
+    await this.engine.pool.raw(query)
+  }
+
+  /**
+   * Re-index the vector store table
+   * @param {string} indexName Optional - index name 
+   */
+  async reIndex(indexName?: string) {
+    const idxName = indexName || (this.tableName + DEFAULT_INDEX_NAME_SUFFIX);
+    const query = `REINDEX INDEX ${idxName};`;
+    this.engine.pool.raw(query)
+  }
 }
 
 export default PostgresVectorStore;
